@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Route Tracking & Notification System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <script src="/socket.io/socket.io.js"></script>
+
+  <style>
+    :root {
+      --bg:        #0a0c10;
+      --surface:   #111419;
+      --border:    #1e2330;
+      --muted:     #2a303f;
+      --text:      #d4dae8;
+      --dim:       #5c6478;
+      --amber:     #f5a623;
+      --amber-dim: #7a5010;
+      --green:     #2dce89;
+      --red:       #f44336;
+      --yellow:    #ffc107;
+      --blue:      #4a9eff;
+      --mono:      'Space Mono', monospace;
+      --sans:      'Syne', sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Header ──────────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 28px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      width: 36px; height: 36px;
+      background: var(--amber);
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+    }
+
+    .logo-text { font-weight: 800; font-size: 15px; letter-spacing: 0.02em; }
+    .logo-sub  { font-size: 10px; color: var(--dim); font-family: var(--mono); letter-spacing: 0.06em; }
+
+    .header-right { display: flex; align-items: center; gap: 16px; }
+
+    .ws-badge {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--muted);
+      color: var(--dim);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .ws-badge.connected { border-color: var(--green); color: var(--green); }
+    .ws-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .ws-badge.connected .ws-dot { animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.3; } }
+
+    .notif-btn {
+      position: relative;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      color: var(--text);
+      font-size: 16px;
+      transition: border-color .2s;
+    }
+    .notif-btn:hover { border-color: var(--amber); }
+    .notif-count {
+      position: absolute;
+      top: -4px; right: -4px;
+      background: var(--red);
+      color: #fff;
+      font-size: 9px;
+      font-family: var(--mono);
+      font-weight: 700;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+    }
+
+    /* ── Layout ──────────────────────────────────────────────────── */
+    .layout {
+      display: grid;
+      grid-template-columns: 260px 1fr 300px;
+      height: calc(100vh - 65px);
+      overflow: hidden;
+    }
+
+    .sidebar, .main, .panel {
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--muted) transparent;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────────────── */
+    .sidebar {
+      border-right: 1px solid var(--border);
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .section-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      color: var(--dim);
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    /* KPI Cards */
+    .kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    .kpi {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      transition: border-color .2s;
+    }
+    .kpi:hover { border-color: var(--muted); }
+    .kpi-val {
+      font-family: var(--mono);
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .kpi-label { font-size: 11px; color: var(--dim); }
+    .kpi.amber .kpi-val { color: var(--amber); }
+    .kpi.green .kpi-val { color: var(--green); }
+    .kpi.red   .kpi-val { color: var(--red); }
+    .kpi.blue  .kpi-val { color: var(--blue); }
+
+    /* Routes list */
+    .route-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+    }
+    .route-item:hover { border-color: var(--amber); background: #141720; }
+    .route-item.selected { border-color: var(--amber); background: #141720; }
+
+    .route-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .route-name { font-size: 13px; font-weight: 600; line-height: 1.3; flex: 1; }
+    .risk-badge {
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .risk-low    { background: rgba(45,206,137,.15); color: var(--green); }
+    .risk-medium { background: rgba(255,193,7,.15);  color: var(--yellow); }
+    .risk-high   { background: rgba(244,67,54,.15);  color: var(--red); }
+
+    .route-meta {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--dim);
+      margin-top: 6px;
+      display: flex;
+      gap: 10px;
+    }
+
+    .risk-bar-wrap { margin-top: 8px; }
+    .risk-bar-bg { background: var(--muted); height: 3px; border-radius: 2px; overflow: hidden; }
+    .risk-bar-fill { height: 100%; border-radius: 2px; transition: width .5s; }
+
+    /* ── Main area ───────────────────────────────────────────────── */
+    .main { padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+
+    /* Map canvas */
+    .map-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .map-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .map-title { font-size: 13px; font-weight: 700; }
+    .map-sub   { font-size: 11px; color: var(--dim); font-family: var(--mono); }
+
+    canvas#map {
+      width: 100%;
+      display: block;
+      background: #0d1018;
+    }
+
+    /* Delivery table */
+    .deliveries-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .section-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .section-title { font-size: 13px; font-weight: 700; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      color: var(--dim);
+      text-align: left;
+      padding: 10px 18px;
+      border-bottom: 1px solid var(--border);
+      text-transform: uppercase;
+    }
+    td {
+      padding: 12px 18px;
+      font-size: 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #13161e; }
+
+    .del-id { font-family: var(--mono); font-weight: 700; color: var(--amber); }
+
+    .status-pill {
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-weight: 700;
+      display: inline-block;
+    }
+    .status-in_transit { background: rgba(74,158,255,.15); color: var(--blue); }
+    .status-delayed    { background: rgba(244,67,54,.15);  color: var(--red); }
+    .status-delivered  { background: rgba(45,206,137,.15); color: var(--green); }
+    .status-pending    { background: rgba(92,100,120,.2);  color: var(--dim); }
+
+    .progress-wrap { display: flex; align-items: center; gap: 8px; }
+    .progress-bg { flex: 1; background: var(--muted); height: 4px; border-radius: 2px; min-width: 60px; }
+    .progress-fill { height: 100%; border-radius: 2px; background: var(--amber); transition: width .5s; }
+    .progress-pct { font-family: var(--mono); font-size: 10px; color: var(--dim); min-width: 30px; }
+
+    .ai-flag {
+      display: inline-block;
+      font-size: 13px;
+      title-tag: 'AI Risk Flagged';
+    }
+
+    /* Assign form */
+    .assign-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+    }
+
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+
+    label { font-size: 11px; color: var(--dim); display: block; margin-bottom: 4px; font-family: var(--mono); }
+
+    input, select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 12px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input:focus, select:focus { border-color: var(--amber); }
+
+    .btn {
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      border: none;
+      transition: opacity .2s, transform .1s;
+    }
+    .btn:hover { opacity: .88; }
+    .btn:active { transform: scale(.98); }
+    .btn-amber { background: var(--amber); color: #0a0c10; }
+    .btn-ghost {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--dim);
+    }
+    .btn-ghost:hover { border-color: var(--amber); color: var(--amber); }
+
+    /* ── Right Panel ─────────────────────────────────────────────── */
+    .panel {
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+    }
+    .tab {
+      flex: 1;
+      padding: 13px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      color: var(--dim);
+      border-bottom: 2px solid transparent;
+      transition: color .2s, border-color .2s;
+    }
+    .tab.active { color: var(--amber); border-bottom-color: var(--amber); }
+
+    .tab-content { display: none; flex: 1; overflow-y: auto; }
+    .tab-content.active { display: block; }
+
+    /* Notifications */
+    .notif-item {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .notif-item:hover { background: #13161e; }
+    .notif-item.unread { background: #12161e; }
+
+    .notif-icon {
+      width: 30px; height: 30px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .sev-high   .notif-icon { background: rgba(244,67,54,.2); }
+    .sev-medium .notif-icon { background: rgba(255,193,7,.15); }
+    .sev-info   .notif-icon { background: rgba(45,206,137,.15); }
+
+    .notif-body { flex: 1; min-width: 0; }
+    .notif-msg  { font-size: 12px; line-height: 1.5; }
+    .notif-time { font-family: var(--mono); font-size: 10px; color: var(--dim); margin-top: 4px; }
+    .unread-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--amber);
+      flex-shrink: 0;
+      margin-top: 5px;
+    }
+
+    /* Agent Logs */
+    .log-item {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.6;
+    }
+    .log-agent { color: var(--amber); }
+    .log-action { color: var(--blue); }
+    .log-time   { color: var(--dim); font-size: 10px; }
+    .log-payload { color: var(--dim); word-break: break-all; }
+
+    /* Toast */
+    #toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 999;
+    }
+    .toast {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--amber);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 12px;
+      max-width: 300px;
+      animation: slideIn .3s ease;
+      box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    }
+    .toast.high   { border-left-color: var(--red); }
+    .toast.medium { border-left-color: var(--yellow); }
+    .toast-title  { font-weight: 700; font-size: 12px; margin-bottom: 2px; }
+    .toast-body   { color: var(--dim); line-height: 1.4; }
+    @keyframes slideIn { from { opacity:0; transform: translateX(20px); } to { opacity:1; transform:none; } }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 2px; }
+
+    .empty { text-align: center; padding: 32px; color: var(--dim); font-size: 12px; }
+
+    /* Mark all read btn */
+    .mark-all-btn {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--amber);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 2px 4px;
+    }
+    .mark-all-btn:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ────────────────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">🚚</div>
+    <div>
+      <div class="logo-text">Route Tracking &amp; Notification System</div>
+      <div class="logo-sub">IT24103283 · Umayanthi R.G.A.A. · Smart Logistics</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="ws-badge" id="ws-badge">
+      <div class="ws-dot"></div>
+      <span id="ws-status">Connecting…</span>
+    </div>
+    <button class="notif-btn" onclick="switchTab('notifications')" title="Notifications">
+      🔔
+      <span class="notif-count" id="notif-count">0</span>
+    </button>
+  </div>
+</header>
+
+<!-- ── Layout ─────────────────────────────────────────────────────────────── -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div>
+      <div class="section-label">Live KPIs</div>
+      <div class="kpi-grid" id="kpi-grid">
+        <div class="kpi amber"><div class="kpi-val" id="kpi-transit">–</div><div class="kpi-label">In Transit</div></div>
+        <div class="kpi red">  <div class="kpi-val" id="kpi-delayed">–</div><div class="kpi-label">Delayed</div></div>
+        <div class="kpi green"><div class="kpi-val" id="kpi-done">–</div>   <div class="kpi-label">Delivered</div></div>
+        <div class="kpi blue"> <div class="kpi-val" id="kpi-pending">–</div><div class="kpi-label">Pending</div></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Delivery Routes</div>
+      <div id="routes-list">
+        <div class="empty">Loading…</div>
+      </div>
+    </div>
+
+    <div style="margin-top:auto; padding-top:16px; border-top:1px solid var(--border)">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--dim)">
+        Last refresh: <span id="last-refresh">–</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- Route Map -->
+    <section class="map-section">
+      <div class="map-header">
+        <div>
+          <div class="map-title">Live Route Map</div>
+          <div class="map-sub" id="map-sub">Select a route to visualise</div>
+        </div>
+        <button class="btn btn-ghost" onclick="loadDashboard()" style="font-size:11px;padding:6px 14px">↻ Refresh</button>
+      </div>
+      <canvas id="map" height="220"></canvas>
+    </section>
+
+    <!-- Deliveries table -->
+    <section class="deliveries-section">
+      <div class="section-header">
+        <div class="section-title">Active Deliveries</div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Route</th>
+            <th>Driver</th>
+            <th>Location</th>
+            <th>Status</th>
+            <th>Progress</th>
+            <th>AI</th>
+          </tr>
+        </thead>
+        <tbody id="deliveries-tbody">
+          <tr><td colspan="7" class="empty">Loading…</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Assign Order -->
+    <section class="assign-section">
+      <div class="section-title" style="margin-bottom:4px">Assign Order to Driver</div>
+      <div style="font-size:12px;color:var(--dim);font-family:var(--mono)">Link an order to a driver on a route</div>
+      <div class="form-grid">
+        <div>
+          <label>Order ID</label>
+          <input id="f-order" type="text" placeholder="ORD-5530" />
+        </div>
+        <div>
+          <label>Customer ID</label>
+          <input id="f-customer" type="text" placeholder="C005" />
+        </div>
+        <div>
+          <label>Driver ID</label>
+          <input id="f-driver" type="text" placeholder="D002" />
+        </div>
+        <div>
+          <label>Route</label>
+          <select id="f-route">
+            <option value="">Loading routes…</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:10px">
+        <button class="btn btn-amber" onclick="assignOrder()">Assign Delivery</button>
+        <button class="btn btn-ghost" onclick="clearForm()">Clear</button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Right Panel -->
+  <aside class="panel">
+    <div class="panel-tabs">
+      <div class="tab active" onclick="switchTab('notifications')" id="tab-notifications">🔔 Alerts</div>
+      <div class="tab" onclick="switchTab('logs')" id="tab-logs">⚙ Agent Logs</div>
+    </div>
+
+    <!-- Notifications tab -->
+    <div class="tab-content active" id="content-notifications">
+      <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--dim)">UNREAD ALERTS</span>
+        <button class="mark-all-btn" onclick="markAllRead()">Mark all read</button>
+      </div>
+      <div id="notifications-list">
+        <div class="empty">No alerts</div>
+      </div>
+    </div>
+
+    <!-- Agent logs tab -->
+    <div class="tab-content" id="content-logs">
+      <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--dim)">AGENT ACTIVITY LOG</span>
+      </div>
+      <div id="logs-list">
+        <div class="empty">No logs yet</div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script>
+  // ── State ───────────────────────────────────────────────────────────────────
+  const API = '';   // Same origin
+  let allRoutes    = [];
+  let allDeliveries = [];
+  let selectedRoute = null;
+
+  // ── Socket.IO ───────────────────────────────────────────────────────────────
+  const socket = io();
+  const wsBadge  = document.getElementById('ws-badge');
+  const wsStatus = document.getElementById('ws-status');
+
+  socket.on('connect', () => {
+    wsBadge.className = 'ws-badge connected';
+    wsStatus.textContent = 'Live';
+  });
+  socket.on('disconnect', () => {
+    wsBadge.className = 'ws-badge';
+    wsStatus.textContent = 'Disconnected';
+  });
+
+  socket.on('init', ({ deliveries, routes }) => {
+    allRoutes = routes;
+    renderRoutes(routes);
+    loadDashboard();
+  });
+
+  socket.on('delivery:update', (delivery) => {
+    const idx = allDeliveries.findIndex(d => d.id === delivery.id);
+    if (idx !== -1) allDeliveries[idx] = delivery; else allDeliveries.push(delivery);
+    renderDeliveries(allDeliveries);
+    updateKPIs(allDeliveries);
+  });
+
+  socket.on('delivery:new', (delivery) => {
+    allDeliveries.push(delivery);
+    renderDeliveries(allDeliveries);
+    updateKPIs(allDeliveries);
+    showToast('New Delivery Assigned', `${delivery.id} → Route ${delivery.routeId}`, 'info');
+  });
+
+  socket.on('notification:new', (n) => {
+    loadNotifications();
+    showToast(n.type.replace(/_/g,' ').toUpperCase(), n.message, n.severity);
+    updateNotifCount();
+  });
+
+  socket.on('route:risk_update', (route) => {
+    const idx = allRoutes.findIndex(r => r.id === route.id);
+    if (idx !== -1) allRoutes[idx] = route;
+    renderRoutes(allRoutes);
+  });
+
+  socket.on('agent:log', (log) => {
+    prependLog(log);
+  });
+
+  // ── Fetch helpers ───────────────────────────────────────────────────────────
+  async function get(path) {
+    const res = await fetch(API + path);
+    return res.json();
+  }
+  async function post(path, body) {
+    const res = await fetch(API + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    return res.json();
+  }
+  async function patch(path, body) {
+    const res = await fetch(API + path, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    return res.json();
+  }
+
+  // ── Load dashboard ──────────────────────────────────────────────────────────
+  async function loadDashboard() {
+    const [routeRes, delRes] = await Promise.all([
+      get('/api/routes'),
+      get('/api/deliveries')
+    ]);
+
+    allRoutes     = routeRes.data || [];
+    allDeliveries = delRes.data   || [];
+
+    renderRoutes(allRoutes);
+    renderDeliveries(allDeliveries);
+    updateKPIs(allDeliveries);
+    populateRouteSelect(allRoutes);
+    loadNotifications();
+    loadAgentLogs();
+
+    document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString();
+  }
+
+  // ── KPIs ────────────────────────────────────────────────────────────────────
+  function updateKPIs(deliveries) {
+    document.getElementById('kpi-transit').textContent = deliveries.filter(d => d.status === 'in_transit').length;
+    document.getElementById('kpi-delayed').textContent = deliveries.filter(d => d.status === 'delayed').length;
+    document.getElementById('kpi-done').textContent    = deliveries.filter(d => d.status === 'delivered').length;
+    document.getElementById('kpi-pending').textContent = deliveries.filter(d => d.status === 'pending').length;
+  }
+
+  // ── Routes sidebar ──────────────────────────────────────────────────────────
+  function renderRoutes(routes) {
+    const el = document.getElementById('routes-list');
+    if (!routes.length) { el.innerHTML = '<div class="empty">No routes</div>'; return; }
+
+    el.innerHTML = routes.filter(r => r.active).map(r => `
+      <div class="route-item ${selectedRoute === r.id ? 'selected' : ''}" onclick="selectRoute('${r.id}')">
+        <div class="route-header">
+          <div class="route-name">${r.name}</div>
+          <span class="risk-badge risk-${r.riskLevel}">${r.riskLevel.toUpperCase()}</span>
+        </div>
+        <div class="route-meta">
+          <span>📍 ${r.waypoints.length} stops</span>
+          <span>🕒 ${r.estimatedMinutes}m</span>
+          <span>📦 ${r.distanceKm}km</span>
+        </div>
+        <div class="risk-bar-wrap">
+          <div class="risk-bar-bg">
+            <div class="risk-bar-fill" style="width:${r.riskScore * 100}%;background:${riskColor(r.riskLevel)}"></div>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function riskColor(level) {
+    return level === 'high' ? 'var(--red)' : level === 'medium' ? 'var(--yellow)' : 'var(--green)';
+  }
+
+  function selectRoute(id) {
+    selectedRoute = id;
+    renderRoutes(allRoutes);
+    drawMap(id);
+  }
+
+  // ── Map canvas ──────────────────────────────────────────────────────────────
+  function drawMap(routeId) {
+    const canvas = document.getElementById('map');
+    const ctx    = canvas.getContext('2d');
+    const W = canvas.offsetWidth;
+    canvas.width  = W * devicePixelRatio;
+    canvas.height = 220 * devicePixelRatio;
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+    const w = W, h = 220;
+
+    const route = allRoutes.find(r => r.id === routeId);
+    if (!route) return;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Background grid
+    ctx.strokeStyle = '#1a1e28';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < w; x += 40) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
+    for (let y = 0; y < h; y += 40) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+
+    const pts = route.waypoints.length;
+    const padding = 60;
+    const xs = route.waypoints.map((_, i) => padding + (i / (pts - 1)) * (w - padding * 2));
+    const ys = route.waypoints.map((_, i) => h / 2 + Math.sin(i * 1.1) * 55);
+
+    // Route line
+    const lineColor = riskColor(route.riskLevel);
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth   = 3;
+    ctx.shadowColor = lineColor;
+    ctx.shadowBlur  = 8;
+    ctx.beginPath();
+    xs.forEach((x, i) => i === 0 ? ctx.moveTo(x, ys[i]) : ctx.lineTo(x, ys[i]));
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Active delivery positions
+    const activeOnRoute = allDeliveries.filter(d => d.routeId === routeId && ['in_transit','delayed'].includes(d.status));
+    activeOnRoute.forEach(del => {
+      const t  = del.progress / 100;
+      const ix = Math.min(pts - 2, Math.floor(t * (pts - 1)));
+      const seg = t * (pts - 1) - ix;
+      const dx  = xs[ix] + seg * (xs[ix + 1] - xs[ix]);
+      const dy  = ys[ix] + seg * (ys[ix + 1] - ys[ix]);
+
+      ctx.beginPath();
+      ctx.arc(dx, dy, 9, 0, Math.PI * 2);
+      ctx.fillStyle = del.status === 'delayed' ? 'var(--red)' : 'var(--amber)';
+      ctx.fill();
+
+      ctx.fillStyle = '#0a0c10';
+      ctx.font = 'bold 10px Space Mono';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🚚', dx, dy);
+
+      // Label
+      ctx.fillStyle = '#d4dae8';
+      ctx.font = '10px Space Mono';
+      ctx.fillText(del.id, dx, dy - 18);
+    });
+
+    // Waypoint nodes
+    route.waypoints.forEach((wp, i) => {
+      ctx.beginPath();
+      ctx.arc(xs[i], ys[i], 5, 0, Math.PI * 2);
+      ctx.fillStyle = i === 0 || i === pts - 1 ? lineColor : '#2a303f';
+      ctx.fill();
+      ctx.strokeStyle = lineColor;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.fillStyle = '#d4dae8';
+      ctx.font = '10px Syne';
+      ctx.textAlign = 'center';
+      ctx.fillText(wp, xs[i], ys[i] + 18);
+    });
+
+    document.getElementById('map-sub').textContent =
+      `${route.name} — Risk: ${(route.riskScore * 100).toFixed(0)}% · ${activeOnRoute.length} active delivery(ies)`;
+  }
+
+  // ── Deliveries table ────────────────────────────────────────────────────────
+  function renderDeliveries(deliveries) {
+    const tbody = document.getElementById('deliveries-tbody');
+    const active = deliveries.filter(d => d.status !== 'delivered');
+
+    if (!active.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">No active deliveries</td></tr>'; return; }
+
+    tbody.innerHTML = active.map(d => {
+      const route = allRoutes.find(r => r.id === d.routeId);
+      return `
+        <tr>
+          <td><span class="del-id">${d.id}</span></td>
+          <td style="font-size:11px">${route ? route.name : d.routeId}</td>
+          <td style="font-family:var(--mono);font-size:11px">${d.driverId}</td>
+          <td style="font-size:11px">${d.currentLocation}</td>
+          <td><span class="status-pill status-${d.status}">${d.status.replace('_',' ')}</span></td>
+          <td>
+            <div class="progress-wrap">
+              <div class="progress-bg"><div class="progress-fill" style="width:${d.progress}%"></div></div>
+              <span class="progress-pct">${d.progress}%</span>
+            </div>
+          </td>
+          <td><span class="ai-flag" title="${d.aiRiskFlag ? 'AI Risk Flagged' : 'Clear'}">${d.aiRiskFlag ? '⚠️' : '✅'}</span></td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // ── Route select dropdown ────────────────────────────────────────────────────
+  function populateRouteSelect(routes) {
+    const sel = document.getElementById('f-route');
+    sel.innerHTML = routes.filter(r => r.active).map(r =>
+      `<option value="${r.id}">[${r.riskLevel.toUpperCase()}] ${r.name}</option>`
+    ).join('');
+  }
+
+  // ── Assign order ─────────────────────────────────────────────────────────────
+  async function assignOrder() {
+    const orderId    = document.getElementById('f-order').value.trim();
+    const customerId = document.getElementById('f-customer').value.trim();
+    const driverId   = document.getElementById('f-driver').value.trim();
+    const routeId    = document.getElementById('f-route').value;
+
+    if (!orderId || !customerId || !driverId || !routeId) {
+      showToast('Validation Error', 'All fields are required.', 'high'); return;
+    }
+
+    const res = await post('/api/deliveries/assign', { orderId, customerId, driverId, routeId });
+    if (res.success) {
+      showToast('Order Assigned', `${res.data.id} dispatched on route ${routeId}`, 'info');
+      clearForm();
+      loadDashboard();
+    } else {
+      showToast('Error', res.message, 'high');
+    }
+  }
+
+  function clearForm() {
+    ['f-order','f-customer','f-driver'].forEach(id => document.getElementById(id).value = '');
+  }
+
+  // ── Notifications ────────────────────────────────────────────────────────────
+  async function loadNotifications() {
+    const res = await get('/api/notifications');
+    const notifs = (res.data || []).filter(n => !n.read);
+    renderNotifications(notifs);
+    updateNotifCount(notifs.length);
+  }
+
+  function renderNotifications(notifs) {
+    const el = document.getElementById('notifications-list');
+    if (!notifs.length) { el.innerHTML = '<div class="empty">All clear ✅</div>'; return; }
+
+    const icons = { delay_alert:'⏰', risk_alert:'⚠️', reroute_suggestion:'🔀', delivery_complete:'✅', info:'ℹ️' };
+
+    el.innerHTML = notifs.map(n => `
+      <div class="notif-item unread sev-${n.severity}" onclick="markRead('${n.id}', this)">
+        <div class="notif-icon">${icons[n.type] || '🔔'}</div>
+        <div class="notif-body">
+          <div class="notif-msg">${n.message}</div>
+          <div class="notif-time">${timeAgo(n.createdAt)}</div>
+        </div>
+        <div class="unread-dot"></div>
+      </div>
+    `).join('');
+  }
+
+  async function markRead(id, el) {
+    await patch(`/api/notifications/${id}/read`, {});
+    el.classList.remove('unread');
+    el.querySelector('.unread-dot')?.remove();
+    updateNotifCount();
+  }
+
+  async function markAllRead() {
+    await post('/api/notifications/read-all', {});
+    loadNotifications();
+  }
+
+  function updateNotifCount(count) {
+    if (count === undefined) {
+      get('/api/notifications?read=false').then(r => {
+        document.getElementById('notif-count').textContent = (r.data || []).filter(n => n.severity !== 'info').length;
+      });
+    } else {
+      document.getElementById('notif-count').textContent = count;
+    }
+  }
+
+  // ── Agent Logs ───────────────────────────────────────────────────────────────
+  async function loadAgentLogs() {
+    const res  = await get('/api/agent/logs?limit=30');
+    const logs = res.data || [];
+    const el   = document.getElementById('logs-list');
+    el.innerHTML = logs.map(logHtml).join('') || '<div class="empty">No logs yet</div>';
+  }
+
+  function logHtml(log) {
+    return `
+      <div class="log-item">
+        <div class="log-time">${new Date(log.timestamp).toLocaleTimeString()}</div>
+        <div><span class="log-agent">${log.agentId}</span> → <span class="log-action">${log.action}</span></div>
+        <div class="log-payload">${JSON.stringify(log.payload)}</div>
+      </div>
+    `;
+  }
+
+  function prependLog(log) {
+    const el = document.getElementById('logs-list');
+    if (el.querySelector('.empty')) el.innerHTML = '';
+    el.insertAdjacentHTML('afterbegin', logHtml(log));
+  }
+
+  // ── Tabs ─────────────────────────────────────────────────────────────────────
+  function switchTab(name) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    document.getElementById('content-' + name).classList.add('active');
+  }
+
+  // ── Toast ────────────────────────────────────────────────────────────────────
+  function showToast(title, body, severity = 'info') {
+    const el = document.createElement('div');
+    el.className = `toast ${severity}`;
+    el.innerHTML = `<div class="toast-title">${title}</div><div class="toast-body">${body}</div>`;
+    document.getElementById('toast-container').appendChild(el);
+    setTimeout(() => el.remove(), 5000);
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+  function timeAgo(iso) {
+    const diff = Date.now() - new Date(iso).getTime();
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m}m ago`;
+    return `${Math.floor(m/60)}h ${m%60}m ago`;
+  }
+
+  // ── Init ─────────────────────────────────────────────────────────────────────
+  loadDashboard();
+  setInterval(loadDashboard, 30000);   // Polling fallback every 30s
+</script>
+</body>
+</html>
